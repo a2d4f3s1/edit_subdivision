@@ -1,0 +1,13 @@
+schema_version = "1.0.0"
+
+id = "edit_subdivision"
+version = "0.1.0"
+name = "Edit Subdivision"
+tagline = "Batch-edit Subdivision Surface modifier settings"
+maintainer = "a2d4f3s1"
+type = "add-on"
+
+tags = ["Modeling"]
+blender_version_min = "4.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+copyright = ["2023 a2d4f3s1"]

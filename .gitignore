@@ -1,0 +1,35 @@
+# Track only the Extension itself (edit_subdivision/) plus README/LICENSE/CHANGELOG/docs.
+# Everything else is local development / personal context.
+
+# Personal/local items not for distribution
+tools/
+reference/
+
+# Local workspace marker files
+*.client
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Build / distribution
+*.zip
+dist/
+build/
+
+# Blender working files (defensive — repo must not contain .blend files)
+*.blend
+*.blend1
+*.blend2
+*.blend@
+
+# Logs
+*.log
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

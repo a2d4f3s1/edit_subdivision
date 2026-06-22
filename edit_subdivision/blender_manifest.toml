@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "edit_subdivision"
-version = "0.1.0"
+version = "0.2.0"
 name = "Edit Subdivision"
 tagline = "Batch-edit Subdivision Surface modifier settings"
 maintainer = "a2d4f3s1"

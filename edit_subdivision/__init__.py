@@ -5,15 +5,19 @@ levels and Optimal Display on every Subdivision Surface (SUBSURF) modifier of
 the selected objects or the whole scene at once.
 """
 
+import fnmatch
+
 import bpy
 from bpy.props import (
     BoolProperty,
+    CollectionProperty,
     EnumProperty,
     IntProperty,
     PointerProperty,
     StringProperty,
 )
 from bpy.types import AddonPreferences, Operator, Panel, PropertyGroup
+from bpy_extras.io_utils import ExportHelper, ImportHelper
 
 ADDON_ID = __package__
 DEFAULT_PANEL_CATEGORY = "EditSubdiv"
@@ -24,12 +28,22 @@ DEFAULT_PANEL_CATEGORY = "EditSubdiv"
 # ---------------------------------------------------------------------------
 
 def _objects_for(settings, context):
-    """Objects targeted by the current 'target' enum."""
+    """Objects targeted by the current 'target' enum, minus excluded names."""
     if settings.target == 'SCENE':
-        return context.scene.objects
-    if settings.target == 'SELECTION':
-        return context.selected_objects
-    return ()
+        objs = context.scene.objects
+    elif settings.target == 'SELECTION':
+        objs = context.selected_objects
+    else:
+        return ()
+
+    if settings.use_exclude:
+        patterns = [item.pattern for item in settings.exclude_patterns if item.pattern]
+        if patterns:
+            objs = [
+                obj for obj in objs
+                if not any(fnmatch.fnmatchcase(obj.name, pat) for pat in patterns)
+            ]
+    return objs
 
 
 def _update_realtime(self, context):
@@ -95,6 +109,14 @@ def _apply_all(settings, context):
 # Property group
 # ---------------------------------------------------------------------------
 
+class EDITSUBDIV_PG_exclude_item(PropertyGroup):
+    pattern: StringProperty(
+        name="",
+        description="Glob pattern matched against object names (e.g. *_face_*)",
+        default="",
+    )
+
+
 class EDITSUBDIV_PG_settings(PropertyGroup):
     target: EnumProperty(
         name="",
@@ -120,6 +142,14 @@ class EDITSUBDIV_PG_settings(PropertyGroup):
         name="Optimal Display", default=False,
         update=_update_optimal_display,
     )
+    use_exclude: BoolProperty(
+        name="Exclude",
+        description="Skip objects whose name matches any pattern below",
+        default=False,
+    )
+    show_exclude: BoolProperty(default=True)
+    exclude_patterns: CollectionProperty(type=EDITSUBDIV_PG_exclude_item)
+    exclude_index: IntProperty(name="", default=0)
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +165,115 @@ class EDITSUBDIV_OT_change_all(Operator):
     def execute(self, context):
         _apply_all(context.scene.edit_subdivision, context)
         return {'FINISHED'}
+
+
+class EDITSUBDIV_OT_exclude_add(Operator):
+    bl_idname = "edit_subdivision.exclude_add"
+    bl_label = "Add Exclude Pattern"
+    bl_description = "Add an exclude pattern row"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        settings = context.scene.edit_subdivision
+        settings.exclude_patterns.add()
+        settings.exclude_index = len(settings.exclude_patterns) - 1
+        return {'FINISHED'}
+
+
+class EDITSUBDIV_OT_exclude_remove(Operator):
+    bl_idname = "edit_subdivision.exclude_remove"
+    bl_label = "Remove Exclude Pattern"
+    bl_description = "Remove the active exclude pattern"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        settings = context.scene.edit_subdivision
+        patterns = settings.exclude_patterns
+        idx = settings.exclude_index
+        if 0 <= idx < len(patterns):
+            patterns.remove(idx)
+            settings.exclude_index = min(idx, len(patterns) - 1)
+        return {'FINISHED'}
+
+
+class EDITSUBDIV_OT_exclude_export(Operator, ExportHelper):
+    bl_idname = "edit_subdivision.exclude_export"
+    bl_label = "Export Patterns"
+    bl_description = "Export exclude patterns to a text file"
+    bl_options = {'INTERNAL'}
+
+    filename_ext = ".txt"
+    filter_glob: StringProperty(default="*.txt", options={'HIDDEN'})
+
+    def invoke(self, context, event):
+        if not self.filepath:
+            self.filepath = "edit_subdivision_exclude" + self.filename_ext
+        return ExportHelper.invoke(self, context, event)
+
+    def execute(self, context):
+        settings = context.scene.edit_subdivision
+        lines = ["# Edit Subdivision exclude patterns"]
+        lines += [item.pattern for item in settings.exclude_patterns if item.pattern]
+        try:
+            with open(self.filepath, "w", encoding="utf-8") as fp:
+                fp.write("\n".join(lines) + "\n")
+        except OSError as ex:
+            self.report({'ERROR'}, f"Export failed: {ex}")
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Exported {len(lines) - 1} pattern(s)")
+        return {'FINISHED'}
+
+
+class EDITSUBDIV_OT_exclude_import(Operator, ImportHelper):
+    bl_idname = "edit_subdivision.exclude_import"
+    bl_label = "Import Patterns"
+    bl_description = "Replace exclude patterns with the contents of a text file"
+    bl_options = {'INTERNAL'}
+
+    filename_ext = ".txt"
+    filter_glob: StringProperty(default="*.txt", options={'HIDDEN'})
+
+    def execute(self, context):
+        try:
+            with open(self.filepath, "r", encoding="utf-8") as fp:
+                raw_lines = fp.readlines()
+        except OSError as ex:
+            self.report({'ERROR'}, f"Import failed: {ex}")
+            return {'CANCELLED'}
+
+        patterns = []
+        for line in raw_lines:
+            text = line.strip()
+            if text and not text.startswith("#"):
+                patterns.append(text)
+
+        settings = context.scene.edit_subdivision
+        settings.exclude_patterns.clear()
+        for pattern in patterns:
+            settings.exclude_patterns.add().pattern = pattern
+        settings.exclude_index = max(0, min(settings.exclude_index, len(patterns) - 1))
+        self.report({'INFO'}, f"Imported {len(patterns)} pattern(s)")
+        return {'FINISHED'}
+
+
+class EDITSUBDIV_UL_exclude(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon,
+                  active_data, active_propname, index):
+        if self.layout_type in {'DEFAULT', 'COMPACT'}:
+            layout.prop(item, "pattern", text="", emboss=False)
+        elif self.layout_type == 'GRID':
+            layout.alignment = 'CENTER'
+            layout.label(text=item.pattern)
+
+
+class EDITSUBDIV_MT_exclude_specials(bpy.types.Menu):
+    bl_idname = "EDITSUBDIV_MT_exclude_specials"
+    bl_label = "Exclude Patterns"
+
+    def draw(self, context):
+        layout = self.layout
+        layout.operator(EDITSUBDIV_OT_exclude_import.bl_idname, icon='IMPORT')
+        layout.operator(EDITSUBDIV_OT_exclude_export.bl_idname, icon='EXPORT')
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +320,28 @@ def _build_panel(category):
             col.use_property_split = True
             col.use_property_decorate = False
             col.prop(settings, "optimal_display")
+
+            box = layout.box()
+            header = box.row(align=True)
+            header.prop(
+                settings, "show_exclude", text="",
+                icon='TRIA_DOWN' if settings.show_exclude else 'TRIA_RIGHT',
+                emboss=False,
+            )
+            header.prop(settings, "use_exclude", text="Exclude")
+            if settings.show_exclude:
+                row = box.row()
+                row.template_list(
+                    "EDITSUBDIV_UL_exclude", "",
+                    settings, "exclude_patterns",
+                    settings, "exclude_index",
+                    rows=3,
+                )
+                col = row.column(align=True)
+                col.operator(EDITSUBDIV_OT_exclude_add.bl_idname, icon='ADD', text="")
+                col.operator(EDITSUBDIV_OT_exclude_remove.bl_idname, icon='REMOVE', text="")
+                col.separator()
+                col.menu(EDITSUBDIV_MT_exclude_specials.bl_idname, icon='DOWNARROW_HLT', text="")
 
             layout.operator(EDITSUBDIV_OT_change_all.bl_idname, text="Apply to All")
 
@@ -238,8 +399,15 @@ class EDITSUBDIV_AddonPreferences(AddonPreferences):
 # ---------------------------------------------------------------------------
 
 _classes = (
+    EDITSUBDIV_PG_exclude_item,
     EDITSUBDIV_PG_settings,
+    EDITSUBDIV_UL_exclude,
+    EDITSUBDIV_MT_exclude_specials,
     EDITSUBDIV_OT_change_all,
+    EDITSUBDIV_OT_exclude_add,
+    EDITSUBDIV_OT_exclude_remove,
+    EDITSUBDIV_OT_exclude_export,
+    EDITSUBDIV_OT_exclude_import,
     EDITSUBDIV_OT_reset_panel_category,
     EDITSUBDIV_AddonPreferences,
 )

@@ -2,7 +2,8 @@
 
 Adds an N-panel that toggles viewport/render visibility, sets viewport/render
 levels and Optimal Display on every Subdivision Surface (SUBSURF) modifier of
-the selected objects or the whole scene at once.
+the selected objects or the whole scene at once. Objects can be excluded from
+processing by name using glob patterns (e.g. *_face_*).
 """
 
 import fnmatch
